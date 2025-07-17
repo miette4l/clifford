@@ -340,7 +340,7 @@ def test_random_measurement_changes_tableau():
 
 def test_associativity_1():
     """
-    To Test associativity: S(HS) = (SH)S
+    To Test associativity: S(HS)|+> = (SH)S|+>
     l1 = HS (first sequence applied on LHS of eq)
     l2 = S (2nd sequence applied on LHS of eq)
     r1 = S (first sequence applied on LHS of eq)

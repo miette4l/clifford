@@ -1,9 +1,9 @@
 """
-An implementation of Aaronson and Gottesman's CHP program:
+An implementation of Aaronson and Gottesman's CHP:
 https://arxiv.org/pdf/quant-ph/0406196
 """
 
-from sage.all import Matrix, GF, UniversalCyclotomicField, copy  # type: ignore
+from sage.all import Matrix, GF, UniversalCyclotomicField  # type: ignore
 import numpy as np
 import random
 
@@ -13,9 +13,7 @@ roots = UniversalCyclotomicField().gen(8)
 
 
 # Stabilizer tableau for the 1-qubit stabilizer states in [ X | Z | r ]
-# r is the phase bit: ri is 1 if Ri has negative phase and 0 if ri has positive phase
-# First row is the destabilizer; 2nd row is the stabilizer
-# N.b. multiple tableaux can represent a single state (different destabilizers)
+# First row: destabilizer; 2nd row: stabilizer
 
 STABILIZER_LOOKUP = {
     "0": Matrix(
@@ -43,7 +41,7 @@ STABILIZER_LOOKUP = {
 class StabilizerTableau:
     def __init__(self, stabilizer_state: str):
         self.name = stabilizer_state
-        self.n = 1  # only 1 for now
+        self.n = 1
         try:
             self.tableau = STABILIZER_LOOKUP[stabilizer_state].__copy__()
         except KeyError:
@@ -51,9 +49,7 @@ class StabilizerTableau:
 
     def __hash__(self):
         """
-        Hash based only on stabilizer generators (rows n to 2n-1)
-        This ensures that tableaux representing the same quantum state
-        have the same hash, even if they have different destabilizers.
+        Flip-flopping between full hash and stabilizer rows only
         """
         # Extract only the stabilizer rows (second half of tableau)
         # stabilizer_rows = []
@@ -70,10 +66,7 @@ class StabilizerTableau:
 
         return hash(tuple(rows))
 
-        # Interestingly this returns 24 states in the orbit - showing degeneracy 4?
-
     def __eq__(self, other):
-        # This isn't very precise...
         return self.tableau == other.tableau
 
     def copy(self):
@@ -248,43 +241,6 @@ class StabilizerTableau:
 
             self.tableau[row_idx, target_idx] = x_ib
             self.tableau[row_idx, control_idx + self.n] = z_ia
-
-    def generate_tableau(self, n_qubits: int, state: str):
-        """
-        Generate a multi-qubit tableau (not implemented yet)
-        I want this to dynamically generate not just check the lookup
-        Plus move this outside the class then have it inject
-
-        Should work like:
-        Given state, do orbit trick to find stabilizers AND destabilizers as Pauli strings
-        convert Pauli strings to rows
-        construct tableau from rows of both types in correct order
-        [ X | Z | r ]
-        create StabilizerTableau object from this tableau
-        """
-        if n_qubits != 1:
-            raise NotImplementedError("Only 1-qubit states supported currently.")
-        self.tableau = copy(STABILIZER_LOOKUP[state])
-        self.n = n_qubits
-        return self.tableau
-
-    def orbit_trick(self, n_qubits, state: str):
-        """
-        NOT DONE
-        Should return a list of stabilizers and destabilizers for a known state as Pauli strings
-        Should be generative not a lookup
-        """
-        if n_qubits > 1:
-            raise NotImplementedError("n > 1 not supported")
-
-        if state == "0":
-            return ["Z"]
-        elif state == "+":
-            return ["X"]
-        elif state == "i":
-            return ["Y"]
-        else:
-            return ["Unknown"]
 
     def tableau_to_state_name(self):
         """

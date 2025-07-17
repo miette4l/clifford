@@ -1,324 +1,283 @@
 """
-Run using `sage clifford.py`
-
-1) We want to:
-- Represent arbitrary 1-qubit stabilizers as binary symplectic vectors in a tableau
-- Represent any 1-qubit Clifford gate as a Clifford tableau with stabilizer phases tracked
-- Conjugate the arbitrary stabilizer under the arbitrary Clifford
-
-2) We then want to:
-- Generate the Clifford group for 1 qubit as Clifford tableaus via composition
-- This means being able to compose Clifford tableaus and properly handle stabilizer phases
-
-3) Next I want to:
-- Fix my non-associativity. Simulate Aaronson & Gottesman's CHP to help understand!
+If I change the mapping in SECTION such that I has [1, 1] phase vector,
+and generate from this I with H, S, I can generate all 24 without the cocycle.
+HOWEVER, this section is not a homomorphism (so it's not a section).
+Found 4 sections that are group homomorphisms.
 """
 
-from abc import ABC
-from sage.all import Matrix, GF, UniversalCyclotomicField  # type: ignore
-
+from sage.all import Matrix, GF # type: ignore
+from carry_table import build_carry_table
+import itertools
+from pprint import pprint
 
 F2 = GF(2)
-roots = UniversalCyclotomicField().gen(8)
 
-# Each Clifford gate is written in tableau format expressing its conjugations of X and Z
-CLIFFORD_LOOKUP = {
-    "I": Matrix(F2, [[1, 0, 0, 0], [0, 1, 0, 0]]),  # X -> X, Z -> Z
-    "X": Matrix(F2, [[1, 0, 0, 0], [0, 1, 1, 0]]),  # X -> X, Z -> -Z
-    "Y": Matrix(F2, [[1, 0, 0, 0], [0, 1, 0, 0]]),  # X -> X, Z -> Z
-    "Z": Matrix(F2, [[1, 0, 1, 0], [0, 1, 0, 0]]),  # X -> -X, Z -> Z
-    "H": Matrix(F2, [[0, 1, 0, 0], [1, 0, 0, 0]]),  # X <-> Z
-    "S": Matrix(F2, [[1, 1, 0, 1], [0, 1, 0, 0]]),  # X -> Y, Z -> Z
+# CARRY_TABLE = CARRY_TABLE_SIMON
+CARRY_TABLE = build_carry_table()
+
+class Tableau:
+    def __init__(self, matrix, name=None):
+        self.data = matrix
+        self.name = name
+
+    def __repr__(self):
+        return str(self.data)
+    
+# Define our 6 symplectic matrices each with a label in {h, s, i} (Simon's notation!!)
+# Using lowercase to distinguish from operators
+BS_MATRICES = {
+    'h': Matrix(F2, [[0, 1], [1, 0]]),
+    's': Matrix(F2, [[1, 0], [1, 1]]),
+    'i': Matrix(F2, [[1, 0], [0, 1]]),
+    'hs': Matrix(F2, [[1, 1], [1, 0]]),
+    'sh': Matrix(F2, [[0, 1], [1, 1]]),
+    'shs': Matrix(F2, [[1, 1], [0, 1]]),
+    }
+
+def mat_key(mat):
+    return tuple(map(tuple, mat.rows()))
+
+REV_BS_MATRICES = {mat_key(mat): name for name, mat in BS_MATRICES.items()}
+
+# Choice of mapping for BS_matrices (6) by their BS_matrix name back to full tableaux
+# This is the 'trivial section'
+SECTION = {
+    'i': Tableau(Matrix(F2, [[1, 0, 0], [0, 1, 0]]), 'I'),
+    'h': Tableau(Matrix(F2, [[0, 1, 0], [1, 0, 0]]), 'H'),
+    's': Tableau(Matrix(F2, [[1, 0, 0], [1, 1, 0]]), 'S'),
+    'hs': Tableau(Matrix(F2, [[1, 1, 0], [1, 0, 0]]), 'HS'),
+    'sh': Tableau(Matrix(F2, [[0, 1, 0], [1, 1, 0]]), 'SH'),
+    'shs': Tableau(Matrix(F2, [[1, 1, 0], [0, 1, 0]]), 'SHS')
 }
 
-# Each stabilizer state is expressed by its stabilizer
-STABILIZER_LOOKUP = {
-    "0": Matrix(F2, [[0, 1, 0, 0]]),  # Stabilizer: Z
-    "1": Matrix(F2, [[0, 1, 1, 0]]),  # Stabilizer: -Z
-    "+": Matrix(F2, [[1, 0, 0, 0]]),  # Stabilizer: X
-    "-": Matrix(F2, [[1, 0, 1, 0]]),  # Stabilizer: -X
-    "i": Matrix(F2, [[1, 1, 0, 1]]),  # Stabilizer: Y
-    "-i": Matrix(F2, [[1, 1, 1, 1]]),  # Stabilizer: -Y
-}
-
-
-class Operator:
+def group_action(g_matrix, phase_vector):
     """
-    Objects to use mainly for testing and conversion for printing.
-    Here I will store the matrices for testing the simulator is equivalent to usual matrix multiplication methods.
-    And the strings so I can pretty print.
+    Nontrivial
     """
+    return g_matrix * phase_vector
 
-    def __init__(self, name, matrix):
-        self.name = name  # Pauli string or name of gate
-        self.matrix = matrix
-        self.pauli = False
-        self.clifford = False
+def carry(bs_1, bs_2):
+    name1 = REV_BS_MATRICES[mat_key(bs_1)].upper()
+    name2 = REV_BS_MATRICES[mat_key(bs_2)].upper()
+    if (name1, name2) in CARRY_TABLE:
+        phase_vector = CARRY_TABLE[(name1, name2)]
+        return Matrix(F2, [[int(phase_vector[0])], [int(phase_vector[1])]])
+    else:
+        raise KeyError(f"Carry table missing entry for ({name1}, {name2})")
+    
+def multiply_tableaux(tab_1, tab_2):
+    out = Matrix(F2, [[0, 0, 0], [0, 0, 0]])
 
+    bs_1, m_1 = tab_1.data[:, 0:2], tab_1.data[:, 2]
+    bs_2, m_2 = tab_2.data[:, 0:2], tab_2.data[:, 2]
 
-class Tableau(ABC):
-    """
-    [ x₁ z₁ r₁ i₁ ]
-    [ x₂ z₂ r₂ i₂ ]
-    """
+    out[:, 0:2] = bs_1 * bs_2
+    out[:, 2] = m_1 + group_action(bs_1, m_2) + carry(bs_1, bs_2) 
 
-    def __init__(self):
-        self.name = None
-        self.tableau = None
-        self.xz = None
-        self.r = None
-        self.i = None
+    result = Tableau(out)
+    return result
 
-    def __hash__(self):
-        return hash(tuple(tuple(row) for row in self.tableau.rows()))
+def multiply_tableaux_no_carry(tab_1, tab_2):
+    out = Matrix(F2, [[0, 0, 0], [0, 0, 0]])
 
-    def __eq__(self, other):
-        """
-        For direct equality checking between Tableau objects
-        """
-        return self.tableau == other.tableau
+    bs_1, m_1 = tab_1.data[:, 0:2], tab_1.data[:, 2]
+    bs_2, m_2 = tab_2.data[:, 0:2], tab_2.data[:, 2]
 
-    def split_tableau(self):
-        self.xz = self.tableau[:, :-2]
-        self.r = self.tableau[:, -2]
-        self.i = self.tableau[:, -1]
+    out[:, 0:2] = bs_1 * bs_2
+    out[:, 2] = m_1 + group_action(bs_1, m_2)  # <- NO carry term
 
-    def recombine_tableau(self):
-        self.tableau = self.xz.augment(self.r).augment(self.i)
+    return Tableau(out, tab_1.name+tab_2.name)
 
-    def print_bin(self):
-        """
-        Print the binary symplectic form tableau
-        """
-        print(self.tableau)
+def two_cocycle_condition(r_name, s_name, t_name):
+    """ r·c(s, t) + c(rs, t) + c(r, st) + c(r, s) = 0 """
+    r = BS_MATRICES[r_name.lower()]
+    s = BS_MATRICES[s_name.lower()]
+    t = BS_MATRICES[t_name.lower()]
 
-    def print_string(self):
-        """
-        Print as Pauli strings for more readability
-        """
-        pass
+    term1 = group_action(r, carry(s, t))
+    
+    rs_mat  = r * s
+    rs_name = REV_BS_MATRICES[mat_key(rs_mat)]
 
+    term2 = carry(BS_MATRICES[rs_name], t)
+    
+    st_mat  = s * t
+    st_name = REV_BS_MATRICES[mat_key(st_mat)]
+    term3 = carry(r, BS_MATRICES[st_name])
+    
+    term4 = carry(r, s)
+    
+    result = term1 + term2 + term3 + term4
+    
+    zero_vector = Matrix(F2, [[0], [0]])
+    satisfied = (result == zero_vector)
 
-class CliffordTableau(Tableau):
-    def __init__(self, clifford: str):
-        super().__init__()
-        self.n = 1
-        self.name = clifford
+    return satisfied
 
-        try:
-            self.tableau = CLIFFORD_LOOKUP[clifford].__copy__()
-        except KeyError:
-            print("Not (yet?) supported")
+def two_cocycle_test():
+    for r, s, t in itertools.product(['h', 's', 'i'], repeat=3):
+        if not two_cocycle_condition(r, s, t):
+            print(f"Testing ({r}, {s}, {t})")
+            print("FALSE")
             return False
+    return True
 
-        self.split_tableau()
+def generate_group():
+    generators = [SECTION['i'], SECTION['h'], SECTION['s']]
+    all_tableaux = generators
 
-    def compose(self, other):
-        """
-        Compose two Clifford tableaux: self ∘ other (other applied first, then self so R->L)
-        There is a bug here, sometimes my associativity tests fails and I lose one minus sign in r
-        So I think there is one phase update rule missing...
-        """
-        new_tableau = CliffordTableau("I")
+    added_new = True
+    while added_new:
+        added_new = False
+        new_elements = []
 
-        new_tableau.xz = other.xz * self.xz
+        for gen in generators:
+            for tab in all_tableaux:
+                try:
+                    new_tab = multiply_tableaux(gen, tab)
+                except KeyError:
+                    continue
 
-        # For each generator in other (X and Z)
-        for i in range(2):
-            # Start with base phases from other
-            phase_r = other.r[i, 0]
-            phase_i = other.i[i, 0]
+                if all(new_tab.data != existing.data for existing in all_tableaux + new_elements):
+                    new_elements.append(new_tab)
+                    added_new = True
+        
+        all_tableaux.extend(new_elements)
 
-            # Get what 'other' transforms this generator to
-            other_x = other.xz[i, 0]
-            other_z = other.xz[i, 1]
+    return all_tableaux
 
-            # Add phases from self's transformation
-            if other_x:  # If other has X component
-                phase_r = (phase_r + self.r[0, 0]) % 2
-                phase_i = (phase_i + self.i[0, 0]) % 2
+def generate_group_no_carry(section):
+    generators = [section['i'], section['h'], section['s']]
+    all_tableaux = generators.copy()
 
-            if other_z:  # If other has Z component
-                phase_r = (phase_r + self.r[1, 0]) % 2
-                phase_i = (phase_i + self.i[1, 0]) % 2
+    added_new = True
+    while added_new:
+        added_new = False
+        new_elements = []
 
-            # Special case for anticommutation: if other maps to Y and self is Hadamard
-            if other_x and other_z and self.xz == Matrix(F2, [[0, 1], [1, 0]]):
-                phase_r = (phase_r + 1) % 2  # H(Y) = -Y
+        for gen in generators:
+            for tab in all_tableaux:
+                new_tab = multiply_tableaux_no_carry(gen, tab)
 
-            # Another special case: i^2=-1
-            if other.i[i, 0] and self.i[i, 0]:
-                phase_r = (phase_r + self.i[i, 0]) % 2
+                if all(new_tab.data != existing.data for existing in all_tableaux + new_elements):
+                    new_elements.append(new_tab)
+                    added_new = True
+        
+        all_tableaux.extend(new_elements)
 
-            # Set final phases
-            new_tableau.r[i, 0] = phase_r
-            new_tableau.i[i, 0] = phase_i
+    return all_tableaux
 
-        new_tableau.recombine_tableau()
+def label_section(group, section):
+    group_dict = {}
 
-        new_tableau.name = f"{self.name}" + f"{other.name}"
+    for element in group:
+        group_dict[element] = None
+        for key, value in section.items():
+            if element.data == value.data:
+                group_dict[element] = key
 
-        return new_tableau
+    return group_dict
 
-    def print_bin(self):
-        super().print_bin()
-
-
-class StabilizerTableau(Tableau):
-    def __init__(self, stabilizer_state: str, phase=1):
-        super().__init__()
-        self.n = 1
-        self.name = stabilizer_state
-        self.global_phase = phase
-
+def is_section_homomorphism(section):
+    for g1, g2 in itertools.product(BS_MATRICES.keys(), repeat=2):
         try:
-            self.tableau = STABILIZER_LOOKUP[stabilizer_state].__copy__()
+            lhs = multiply_tableaux(section[g1], section[g2])
         except KeyError:
-            print(f"Unknown stabilizer state '{stabilizer_state}'")
+            print(section)
+        g1g2 = BS_MATRICES[g1] * BS_MATRICES[g2]
+        g1g2_name = REV_BS_MATRICES[mat_key(g1g2)]
+        rhs = section[g1g2_name]
+        if lhs.data != rhs.data:
             return False
+    return True
 
-        self.split_tableau()
+def all_phase_vectors():
+    return [Matrix(F2, [[a], [b]]) for a in [0, 1] for b in [0, 1]]
 
-    def print_bin(self):
-        super().print_bin()
+def build_tableau(symplectic_matrix, phase_vector, name):
+    return Tableau(symplectic_matrix.augment(phase_vector), name)
 
-    def conjugate(self, clifford_tableau: CliffordTableau):
-        for row in range(self.xz.nrows()):
-            x = self.xz[row, 0]
-            z = self.xz[row, 1]
+def brute_force_sections():
+    phase_options = all_phase_vectors()
+    names = ['i', 'h', 's', 'hs', 'sh', 'shs']
+    successful_sections = []
 
-            # Do the rs and is
-            # First combining any is (i^2=-1 case)
-            if self.i[row, 0] and clifford_tableau.i[row, 0]:
-                self.r[row, 0] += clifford_tableau.i[row, 0]
+    count = 0
+    for phase_vector_combo in itertools.product(phase_options, repeat=6):
+        section = {}
+        for i, name in enumerate(names):
+            section[name] = build_tableau(BS_MATRICES[name], phase_vector_combo[i], name.upper())
 
-            # Then general sssstuff
-            self.r[row, 0] = (
-                self.r[row, 0]
-                + x * clifford_tableau.r[0, 0]
-                + z * clifford_tableau.r[1, 0]
-            ) % 2
-            self.i[row, 0] = (
-                self.i[row, 0]
-                + x * clifford_tableau.i[0, 0]
-                + z * clifford_tableau.i[1, 0]
-            ) % 2
+        if is_section_homomorphism(section):
+            print(f"Found homomorphic section! #{len(successful_sections)+1}")
+            successful_sections.append(section)
 
-            # Finally X and Z anticommutation
-            if clifford_tableau.xz == Matrix(F2, [[0, 1], [1, 0]]) and x and z:
-                self.r[row, 0] = (self.r[row, 0] + 1) % 2
+        count += 1
+        if count % 500 == 0:
+            print(f"Tried {count} sections...")
 
-        # Do the xs and zs
-        self.xz = self.xz * clifford_tableau.xz
-
-        self.recombine_tableau()
-
-        return self.tableau
-
-
-def generate_Clifford_group():
-    """
-    Generate the Clifford group for 1 qubit from H, S and I^{1/8}.
-    """
-    generators = [CliffordTableau("H"), CliffordTableau("S")]
-
-    group = set(generators)
-    added = True
-
-    while added:
-        added = False
-        new_elements = set()
-
-        for g1 in group:
-            for g2 in generators:
-                composed_1 = g1.compose(g2)
-                composed_2 = g2.compose(g1)
-                if composed_1 not in group:
-                    new_elements.add(composed_1)
-                    print(composed_1.name)
-                if composed_1 not in group:
-                    new_elements.add(composed_2)
-                    print(composed_2.name)
-
-        if new_elements:
-            group.update(new_elements)
-            added = True
-
-    return group
-
-
-def find_order(clifford_element):
-    """Find order of a CliffordTableau element"""
-    identity = CliffordTableau("I")
-    current = clifford_element
-
-    for n in range(1, 25):
-        if current.tableau == identity.tableau:
-            print(f"Order of {clifford_element.name}: {n}")
-            return n
-        current = current.compose(clifford_element)
-
-    return None
-
-
-def print_orders(elements):
-    """Print order distribution for a set of CliffordTableau elements"""
-    orders = {order: 0 for order in range(1, 7)}
-
-    for element in elements:
-        if element == CliffordTableau("I"):
-            print("Hi")
-            orders[1] += 1
-        else:
-            order = find_order(element)
-            orders[order] += 1
-
-    print(orders)
+    print(f"Total homomorphic sections found: {len(successful_sections)}")
+    return successful_sections
 
 
 if __name__ == "__main__":
-    grwp = generate_Clifford_group()
-    print(len(grwp))
-    print_orders(grwp)
-    eighth_roots = [roots**k for k in range(8)]
-    print(eighth_roots)
 
-    big_group = set()
+    print("Generating group")
 
-    # Each object will have to be an eighth ROU or scalar 1->8
+    group = generate_group()
 
-    for element in grwp:
-        for i, root in enumerate(eighth_roots):
-            scaled_element = (element, i + 1)
-            big_group.add(scaled_element)
+    print("Group order: ", len(group))
 
-    print(len(big_group))
+    pprint(label_section(group, SECTION))
 
-    # Gonna try and make some orbits for F=I^{1/8}SH
+    print("Checking two cocycle condition: ", two_cocycle_test())
 
-    # We need all the stabilizer states
+    print("Brute-forcing sections...")
+    homomorphic_sections = brute_force_sections()
 
-    x = StabilizerTableau("+")
-    y = StabilizerTableau("i")
-    z = StabilizerTableau("0")
+    if homomorphic_sections:
+        for i, s in enumerate(homomorphic_sections):
+            print(f"Homomorphic section {i+1}")
+            for key, mat in s.items():
+                print(f"{key}:")
+                print(mat)
+                print()
+    else:
+        print("No homomorphic sections found.")
 
-    h = CliffordTableau("H")
-    s = CliffordTableau("S")
-    sh = s.compose(h)
+    print("Can I generate the group with these?")
+    print()
 
-    outcome = StabilizerTableau("+")
-    order = 0
+    sections_orders = {}
 
-    while True:
-        outcome.conjugate(sh)
-        order += 1
+    for i, section_h in enumerate(homomorphic_sections):
 
-        if outcome.tableau == x.tableau:
-            break
+        group = generate_group_no_carry(section_h)
 
-        if order > 50:
-            break
+        sections_orders[i+1] = len(group)
 
-    print(order)
+    print(sections_orders)
 
-    # Now if I added a scalar global phase omega and tracked global phase throughout would I get my higher orbit? How?
+    for element in group:
+        print(element.name)
+        print(element)
+        print()
+
+"""
+Carry function is a 2-cocycle.
+
+Found 4 alternate sections where multiplication works with no carry.
+
+This means the cocycle is “trivial in cohomology” i.e. it's not a real obstruction.
+
+The group extension is split: G≅Q⋉V, a semidirect product.
+
+The cocycle is actually a *coboundary*.
+
+When I define my section, I am picking my representatives.
+When I then generate the full group from this section, I have a complete set of representatives of the group.
+I can easily check if any two elements are equal (up to global phase).
+We can multiply tableaux according to our group law.
+We solve the *word problem* when we have a word for each of these; I'll do that below vvvv
+"""
+

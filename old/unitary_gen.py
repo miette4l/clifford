@@ -1,5 +1,6 @@
 """
-Generate the Clifford group for 1 qubit via composition of H and S unitary matrices until closure
+Generation of the Clifford group for 1 qubit via numpy matrix multiplication.
+Includes generation of Cayley table.
 """
 
 import numpy as np
@@ -137,17 +138,14 @@ def print_cayley_table(group, table):
 
 if __name__ == "__main__":
     print("Generating Clifford group on 1 qubit up to global phases")
-    group_up_to_phases = generate_clifford_group(generators, global_phase=True)
+    group_up_to_phases = generate_clifford_group(generators, global_phase=False)
     print("Group generated:")
     names = [element.name for element in group_up_to_phases]
     print(names)
     print("Order:")
     print(len(names))
     print("Checking associativity for this group")
-    if is_associative(group_up_to_phases):
-        print("It is associative ✅ ")
-    else:
-        print("Not associative ❌ ")
+    print(is_associative(group_up_to_phases))
     print("Generating Cayley table for this group")
-    table = make_cayley_table(group_up_to_phases, 5)
+    table = make_cayley_table(group_up_to_phases, 26)
     print_cayley_table(group_up_to_phases, table)

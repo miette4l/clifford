@@ -1,10 +1,8 @@
 """
-Generate all distinct states reachable from |+⟩ by applying H and S gates with a CHP simulator
-This finds the orbit of |+⟩ under the Clifford group action
-So is generating the group action as opposed to the abstract group
+Generate single qubit Clifford group via group action with CHP
 
-NB the stabilizer only hash -> 6 states
-the full tableau hash -> 24 tableaux (with destabilizer->state degeneracy)
+NB the stabilizer only hash -> 24 tableaux
+the full tableau hash -> 24 tableaux
 """
 
 from chp import StabilizerTableau
@@ -16,6 +14,7 @@ F2 = GF(2)
 
 class StateOrbitGenerator:
     def __init__(self, initial_state="+"):
+        # Tableaux are labelled by state stabilized by the represented operator
         self.initial_state = initial_state
         self.generators = ["H", "S"]
         self.found_states = set()
@@ -27,12 +26,9 @@ class StateOrbitGenerator:
         for gate in reversed(gate_sequence):
             state.conjugate(gate)
 
-        # Hello rowsum??? Not needed until measurement??
-
         return state
 
     def find_stabilizer_state_name(self, tableau):
-        """Try to identify if this tableau corresponds to a stabilizer state"""
         stabilizer_states = {
             "0": StabilizerTableau("0"),
             "1": StabilizerTableau("1"),
@@ -101,74 +97,6 @@ class StateOrbitGenerator:
 
         return state_info
 
-    def analyze_orbit_structure(self, state_info):
-        """Print the structure of the found orbit"""
-        print(f"Total states in orbit: {len(state_info)}")
-
-        # Group by state name
-        by_state_name = {}
-        unknown_count = 0
-
-        for sequence, tableau, state_name in state_info:
-            if state_name:
-                if state_name not in by_state_name:
-                    by_state_name[state_name] = []
-                by_state_name[state_name].append(sequence)
-            else:
-                unknown_count += 1
-
-        print(f"Known stabilizer states found: {len(by_state_name)}")
-        print(f"Unknown states: {unknown_count}")
-
-        print("\nWays to reach each stabilizer state:")
-        for state_name in sorted(by_state_name.keys()):
-            sequences = by_state_name[state_name]
-            print(f"  |{state_name}⟩: {len(sequences)} ways")
-
-            # Show shortest sequences
-            shortest = min(sequences, key=len)
-            longest = max(sequences, key=len)
-            shortest_str = "".join(shortest) if shortest else "I"
-            longest_str = "".join(longest) if longest else "I"
-
-            if len(sequences) <= 3:
-                # Show all if few
-                all_seqs = [("".join(seq) if seq else "I") for seq in sequences]
-                print(f"    Sequences: {all_seqs}")
-            else:
-                # Show range if many
-                print(f"    Shortest: {shortest_str}, Longest: {longest_str}")
-
-        # Check if we found all 6 stabilizer single-qubit states
-        expected_states = {"0", "1", "+", "-", "i", "-i"}
-        # Corresponding to conjugation to Z, -Z, X, -X, Y, -Y
-        found_states = set(by_state_name.keys())
-
-        print(f"\nExpected stabilizer states: {expected_states}")
-        print(f"Found stabilizer states: {found_states}")
-
-        if found_states == expected_states:
-            print("All 6 stabilizer single-qubit states are reachable!")
-        else:
-            missing = expected_states - found_states
-            extra = found_states - expected_states
-            if missing:
-                print(f"Missing states: {missing}")
-            if extra:
-                print(f"Extra states: {extra}")
-
-    def explore_complete_orbit(self):
-        """Main method to explore the complete orbit"""
-        print(f"Orbit exploration from |{self.initial_state}⟩")
-
-        # Generate the complete orbit
-        state_info = self.generate_orbit_brute_force()
-
-        # Analyze the results
-        self.analyze_orbit_structure(state_info)
-
-        return state_info
-
 
 class GroupActionTableGenerator:
     def __init__(self):
@@ -176,18 +104,12 @@ class GroupActionTableGenerator:
         self.generators = ["H", "S"]
 
     def apply_sequence(self, sequence, state):
-        """Apply gate sequence to a state, return result state"""
+        """Apply gate sequence to a state, return resulting tableau"""
         tableau = StabilizerTableau(state)
         for gate in reversed(sequence):
             tableau.conjugate(gate)
 
         return tableau
-
-        # Find which state this is
-        for s in self.states:
-            if hash(tableau) == hash(StabilizerTableau(s)):
-                return s
-        return None
 
     def sequence_to_permutation(self, sequence):
         """Convert sequence to how it permutes all 6 states"""
@@ -298,20 +220,8 @@ class GroupActionTableGenerator:
 
 
 if __name__ == "__main__":
-    # Find the orbit of [H, S]
 
     explorer = StateOrbitGenerator("+")
-    orbit = explorer.explore_complete_orbit()
-
-    print(f"\nComplete orbit has {len(orbit)} distinct states.")
-
-    # Orbit-stabilizer theorem - stabilizer order 4??
-    # |Orbit| * |stabilizer| = |G|
-    # 6 * 4 = 24
-
-    # Generate a group action table
-    # Representing Clifford operations as *permutations* of stabilizer states
-    # Cayley's theorem??
 
     gen = GroupActionTableGenerator()
 
