@@ -1,5 +1,7 @@
 """
-Generate a carry table to use as the 2-cocycle
+Builds the carry table for the 2-cocycle ω: Q × Q → P
+used in the split extension C ≅ P ⋊ Q (Clifford group on 1 qubit).
+Each carry is a pair of bits representing a Pauli correction.
 """
 
 import numpy as np
@@ -9,34 +11,36 @@ X = np.array([[0, 1], [1, 0]], dtype=complex)
 Y = np.array([[0, -1j], [1j, 0]], dtype=complex)
 Z = np.array([[1, 0], [0, -1]], dtype=complex)
 
-H = (1 / np.sqrt(2)) * np.array([[1, 1],
-                                 [1, -1]], dtype=complex)
-S = np.array([[1, 0],
-              [0, 1j]], dtype=complex)
-SH  = S @ H
-HS  = H @ S
+H = (1 / np.sqrt(2)) * np.array([[1, 1], [1, -1]], dtype=complex)
+S = np.array([[1, 0], [0, 1j]], dtype=complex)
+SH = S @ H
+HS = H @ S
 SHS = S @ H @ S
 
-unitaries = {
-    'I': I,
-    'H': H,
-    'S': S,
-    'SH': SH,
-    'HS': HS,
-    'SHS': SHS,
+# This is actually a (non-homomorphic) 'section'. The carry table depends on this choice
+UNITARIES = {
+    "I": I,
+    "H": H,
+    "S": S,
+    "SH": SH,
+    "HS": HS,
+    "SHS": SHS,
 }
 
-PAULIS = {'I': I, 'X': X, 'Y': Y, 'Z': Z}
-PAULI_TO_CARRY = {'I': [0, 0], 'X': [1, 0], 'Z': [0, 1], 'Y': [1, 1]}
+PAULIS = {"I": I, "X": X, "Y": Y, "Z": Z}
+PAULI_TO_CARRY = {"I": [0, 0], "X": [1, 0], "Z": [0, 1], "Y": [1, 1]}
+
 
 def remove_global_phase(U):
     """return U with global phase stripped (det(U)=1)."""
     phase = np.angle(np.linalg.det(U)) / U.shape[0]
     return U * np.exp(-1j * phase)
 
+
 def same_up_to_phase(A, B, atol=1e-10):
     """True if A ≈ e^{iφ} B."""
     return np.allclose(remove_global_phase(A), remove_global_phase(B), atol=atol)
+
 
 def identify_pauli(U):
     """Which Pauli (incl I) is U up to phase?"""
@@ -45,39 +49,48 @@ def identify_pauli(U):
             return name
     return None
 
+
 PHASES = [1, -1, 1j, -1j]
 
 # This is the normal form kinda thing
 
+
 def canonical_decomposition(prod):
     """
-    Return (pauli_name, canonical_name) such that
-        prod ≈ phase * Pauli * canonical_unitary
-    with phase ∈ {±1, ±i}.
+    Decompose a unitary as:
+        prod ≈ phase · P · Q
+    with:
+        - phase ∈ {±1, ±i}
+        - P ∈ Pauli group
+        - Q ∈ canonical Clifford reps (Q_GENERATORS)
+    Returns:
+        (pauli_label, Q_label)
     """
     for phase in PHASES:
-        M = remove_global_phase(prod / phase)   # divide by phase, then strip any leftover
-        for pname, P in PAULIS.items():
-            for gname, U in unitaries.items():
-                if np.allclose(M, remove_global_phase(P @ U), atol=1e-10):
-                    return pname, gname
-    raise ValueError("Matrix does not match any phase*Pauli*canonical element.")
+        M = remove_global_phase(prod / phase)
+        for p_name, P in PAULIS.items():
+            for q_name, Q in UNITARIES.items():
+                if np.allclose(M, remove_global_phase(P @ Q), atol=1e-10):
+                    return p_name, q_name
+    raise ValueError("Input matrix not decomposable into phase * Pauli * Clifford")
+
 
 def compute_carry(name1, name2):
-    U1 = unitaries[name1]
-    U2 = unitaries[name2]
+    U1 = UNITARIES[name1]
+    U2 = UNITARIES[name2]
     raw_prod = U1 @ U2
 
     pauli_name, canon_name = canonical_decomposition(raw_prod)
     carry_bits = PAULI_TO_CARRY[pauli_name]
     return carry_bits, canon_name
 
+
 def build_carry_table():
     table = {}
-    for g1 in unitaries:
-        for g2 in unitaries:
-            carry, _ = compute_carry(g1, g2)
-            table[(g1, g2)] = carry
+    for u1 in UNITARIES:
+        for u2 in UNITARIES:
+            carry, _ = compute_carry(u1, u2)
+            table[(u1, u2)] = carry
     return table
 
 
