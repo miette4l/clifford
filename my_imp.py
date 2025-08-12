@@ -90,7 +90,7 @@ def multiply_with_cocycle(c1: CliffordElement, c2: CliffordElement) -> CliffordE
     gh = g * h
     new_v = v + g * w + cocycle(g, h)
 
-    return CliffordElement(gh.augment(new_v))
+    return CliffordElement(gh.augment(new_v), c1.name + c2.name)
 
 
 def multiply_without_cocycle(
@@ -215,6 +215,97 @@ def is_section_homomorphism(section):
             return False
     return True
 
+def one_cocycle_test(section):
+    for q1_name, q2_name in itertools.product(Q_ELEMS, repeat=2):
+        q1, q2 = Q_ELEMS[q1_name], Q_ELEMS[q2_name]
+        q1q2 = q1 * q2
+        v1 = section[q1_name].tableau[:, 2]
+        v2 = section[q2_name].tableau[:, 2]
+        v12 = section[REV_Q_ELEMS[mat_key(q1q2)]].tableau[:, 2]
+        if v1 + q1 * v2 != v12:
+            return False
+    return True
+
+def coboundary_test(section):
+    """
+    Try to find p ∈ P such that f(q) = q·p + p for all q ∈ Q,
+    where f(q) = section[q].v is the 1-cocycle defined by the section.
+    Return the p if found, else return None.
+    """
+    for p in all_p():
+        if all(
+            section[q].tableau[:, 2] == Q_ELEMS[q] * p + p
+            for q in Q_ELEMS
+        ):
+            return p
+        return False
+    return True
+    
+def find_coboundary_between(f1, f2):
+    """
+    Given two cocycles f1, f2: Q -> P (dicts mapping q_name -> P matrix),
+    test if there exists p in P with f1(q) = f2(q) + q.p + p for all q.
+    Return p if exists, else None.
+    """
+    p_candidates = all_p()  # All elements of P = Z2^2
+    
+    for p in p_candidates:
+        if all(
+            (f1[q_name] == f2[q_name] + group_action(Q_ELEMS[q_name], p) + p)
+            for q_name in Q_ELEMS
+        ):
+            return p
+    return None
+
+def section_to_cocycle(section):
+    return { q_name: section[q_name].tableau[:, 2] for q_name in Q_ELEMS }
+
+def find_cohomology_classes(cocycles):
+    classes = []
+    for c in cocycles:
+        found_class = False
+        for rep in classes:
+            if find_coboundary_between(c, rep) is not None:
+                found_class = True
+                break
+        if not found_class:
+            classes.append(c)
+    return classes
+
+def count_1_cocycles():
+    """
+    Count the total number of 1-cocycles f: Q -> P satisfying
+    the 1-cocycle condition: f(q1 q2) = f(q1) + q1·f(q2)
+    where Q ≅ S3 and P ≅ Z2 × Z2 with given group action.
+    """
+    p_elements = all_p()
+    q_elements = list(Q_ELEMS.keys())
+
+    count = 0
+
+    for candidate_vals in itertools.product(p_elements, repeat=len(q_elements)):
+        f = dict(zip(q_elements, candidate_vals))
+
+
+        # f(q1 q2) == f(q1) + q1·f(q2)
+        valid = True
+        for q1_name, q2_name in itertools.product(q_elements, repeat=2):
+            q1 = Q_ELEMS[q1_name]
+            q2 = Q_ELEMS[q2_name]
+            q1q2 = q1 * q2
+            q1q2_name = REV_Q_ELEMS[mat_key(q1q2)]
+
+            left = f[q1q2_name]
+            right = f[q1_name] + group_action(q1, f[q2_name])
+
+            if left != right:
+                valid = False
+                break
+
+        if valid:
+            count += 1
+
+    return count
 
 def all_p():
     return [Matrix(F2, [[a], [b]]) for a in [0, 1] for b in [0, 1]]
@@ -249,12 +340,42 @@ def brute_force_sections():
     print(f"Total homomorphic sections found: {len(successful_sections)}")
     return successful_sections
 
+def apply_stabilizer_circuit(gate_sequence, section=TRIVIAL_SECTION, use_cocycle=True):
+    """
+    Apply a stabilizer circuit (list of gate names) to the identity tableau.
+    
+    Args:
+        gate_sequence: List of gate names from section keys, e.g. ["H", "S", "H"]. (Has to be decomoposed in advance)
+        section: A dict mapping gate names to CliffordElements, i.e. a section Q → C (default: trivial section).
+        use_cocycle: Whether to apply the cocycle in multiplication (default: True).
+
+    Returns:
+        Final CliffordElement after applying all gates.
+    """
+    assert all(g in section for g in gate_sequence), "Gate not found in section"
+
+    # Start from identity
+    current = section["i"]
+
+    for gate in gate_sequence[::-1]:
+        next_elem = section[gate.lower()]  # Lowercase keys
+        if use_cocycle:
+            current = multiply_with_cocycle(current, next_elem)
+        else:
+            current = multiply_without_cocycle(current, next_elem)
+
+    return current
+
 
 if __name__ == "__main__":
-    print("Generating group")
+    print("Generating group using carry table")
 
     group = generate_group()
     assert len(group) == 24, "Error: Expected order-24 Clifford group"
+
+    for item in group:
+        print(item.name)
+        print(item)
 
     print("Group order: ", len(group))
 
@@ -262,6 +383,7 @@ if __name__ == "__main__":
 
     print("Searching for sections by brute force...")
     homomorphic_sections = brute_force_sections()
+    cocycles = [section_to_cocycle(s) for s in homomorphic_sections]
 
     if homomorphic_sections:
         for i, s in enumerate(homomorphic_sections):
@@ -270,6 +392,10 @@ if __name__ == "__main__":
                 print(f"{key}:")
                 print(mat)
                 print()
+            print("Is 1-cocycle?")
+            print(one_cocycle_test(s))
+            print("Is coboundary?")
+            print(coboundary_test(s))
     else:
         print("No homomorphic sections found.")
 
@@ -286,25 +412,62 @@ if __name__ == "__main__":
     print("Sections and their respective group orders")
     print(sections_orders)
 
-    for element in group:
-        print(element.name)
-        print(element)
-        print()
+    print("Searching for cocycles that differ only by a coboundary")
+
+    n = len(cocycles)
+    for i in range(n):
+        for j in range(i+1, n):
+            p = find_coboundary_between(cocycles[i], cocycles[j])
+            if p is not None:
+                print(f"Cocycles {i} and {j} differ by coboundary with p =\n{p}")
+            else:
+                print(f"Cocycles {i} and {j} NOT cohomologous")
+
+    classes = find_cohomology_classes(cocycles)
+    print(f"Number of distinct cohomology classes = {len(classes)}")
+
+    print("Number of 1-cocycles")
+    print(count_1_cocycles())
+
+    print(apply_stabilizer_circuit('shs',))
+
+    # Define two circuits that should be equivalent (up to global phase, including pauli correction):
+    circuit1 = "ssss"
+    circuit2 = "i"
+
+    elem1 = apply_stabilizer_circuit(circuit1, section=homomorphic_sections[-1], use_cocycle=False)
+    elem2 = apply_stabilizer_circuit(circuit2, section=homomorphic_sections[-1], use_cocycle=False)
+
+    def are_tableaux_equal(elem_a, elem_b):
+        return (elem_a.tableau == elem_b.tableau)
+
+    print("Tableau 1:")
+    print(elem1.tableau)
+    print("Tableau 2:")
+    print(elem2.tableau)
+    print("Equivalent (including Pauli correction)?", are_tableaux_equal(elem1, elem2))
 
 """
-Carry function is a 2-cocycle.
+When the mapping Q → C is not a group homomorphism, the carry function is a non-trivial 2-cocycle.
 
 Found 4 alternate sections where multiplication to order-24 group works with no cocycle.
-(Also a generator selection (I has [1, 1] phase vector) such that the cocycle is 'encoded'.)
 
 Existence of sections means:
-    - The cocycle is “trivial in cohomology".
+    - The 2-cocycle is trivial.
     - The group extension is split (by 4 distinct sections): G≅Q⋊V, giving a semidirect product structure.
-    - The cocycle is actually a *coboundary*.
 
-When I define my section, I am picking my representatives.
-When I then generate the full group from this section, I have a complete set of representatives of the group.
-I can easily check if any two elements are equal (up to global phase).
-We can multiply tableaux according to our group law.
-We solve the *word problem* as we have a word for each of our elements that we can reduce any string down to.
+There are exactly 4 homomorphic sections s: Q → C, corresponding to 4 embeddings of Q ≅ S₃ into the Clifford group modulo phase.
+Each section defines a 1-cocycle, and any pair differs by conjugation with an element of P ≅ Z₂ × Z₂.
+Thus, the cocycles differ only by 3 nontrivial coboundaries, meaning they all belong to the same cohomology class in H¹(Q, P), which is trivial.
+H¹(Q, P) = 0 (trivial group).
+The extension splits in a "unique cohomology class", even though there are 4 distinct splittings.
+
+What is the order of the cohomology class H¹(Q, P)?
+    - P has 4 elements.
+    - The set of 1-cocycles Z^1(Q,P) has 4 elements (found computationally).
+    - The coboundary subgroup B^1(Q,P) has 4 elements (including the trivial coboundary) (found computationally, but simple).
+    - H^1(Q,P) is the quotient B/Z={0}.
+    - So the first cohomology class is trivial.
+
+Why are there 4 sections out of 4^6 possible mappings?
 """
